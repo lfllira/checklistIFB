@@ -116,10 +116,11 @@ async function syncToSheets(data) {
   try {
     const resp = await fetch(SYNC_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'sync', payload: data }),
+      redirect: 'follow',
     });
-    return await resp.json();
+    const text = await resp.text();
+    try { return JSON.parse(text); } catch { return { status: 'ok', raw: text }; }
   } catch (e) {
     return { error: e.message };
   }
