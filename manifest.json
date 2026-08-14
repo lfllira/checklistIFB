@@ -1,0 +1,13 @@
+{
+  "name": "Inspeção Predial — IFB/SPU",
+  "short_name": "Inspeção",
+  "description": "Check list de inspeção predial — Projeto 730 — NBR 16747",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1F4E3D",
+  "theme_color": "#1F4E3D",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

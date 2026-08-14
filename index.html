@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1F4E3D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<title>Inspeção Predial — IFB/SPU</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f4f6f4; color: #333; }
+  input, textarea, button { font-family: inherit; }
+  @media print {
+    .no-print { display: none !important; }
+    body { background: white; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════
+// CONFIG — Cole aqui a URL do seu Apps Script
+// ═══════════════════════════════════════════════
+const SYNC_URL = ''; // Ex: 'https://script.google.com/macros/s/XXXX/exec'
+
+// ═══════════════════════════════════════════════
+// DATA
+// ═══════════════════════════════════════════════
+const SECTIONS = [
+  { id:"estruturas", title:"1. Estruturas", icon:"\u{1F3D7}",
+    tipo:["Concreto armado","Metálica","Madeira","Alvenaria estrutural","Outro"],
+    situacao:["Fissuras","Destacam./desagreg./desplacam.","Armadura exposta","Efloresc./lixiviação/infiltração","Corrosão","Deformação excessiva","Irregul. geom./falha concretagem","Outro"] },
+  { id:"vedacao", title:"2. Vedação", icon:"\u{1F9F1}",
+    tipo:["Alv. bloco cerâmico","Alv. bloco concreto","Drywall","Divisória naval","Madeira","Outro"],
+    situacao:["Fissura/trinca","Eflorescência","Irregul. geométricas (esq/prumo/nível)","Outro"] },
+  { id:"esquadria", title:"3. Esquadria", icon:"\u{1F6AA}",
+    tipo:["Madeira","Ferro","Alumínio","Divisória naval","Outro"],
+    situacao:["Ataque de pragas","Componentes danificados","Folga vidros / quebrados","Perda mobilidade / abertura","Rompim. selante / infiltração","Defic. pintura / oxidação / corrosão","Outro"] },
+  { id:"forro", title:"4. Revest. Forro", icon:"\u2B06",
+    tipo:["Gesso","Madeira","PVC","Laje","Outro"],
+    situacao:["Deformação excessiva","Fissura","Desencaixe","Defic./inexist. alçapões","Material sujeito a corrosão","Outro"] },
+  { id:"parede", title:"5. Revest. Parede", icon:"\u{1FAB5}",
+    tipo:["Argamassado","Cerâmico","Pintura","Gesso","Papel de parede","Outro"],
+    situacao:["Fissura","Destacam./desagreg./descolam.","Infiltração","Efloresc./mofo/bolor","Descascam./bolhas/enrugam.","Defic. juntas/rejunte","Som cavo","Abertura improv. p/ cabos","Outro"] },
+  { id:"piso", title:"6. Revest. Piso", icon:"\u{1F532}",
+    tipo:["Cerâmico","Mármore/granito","Cimentado","Granitina","Carpete","Taco/madeira","Vinílico","Outro"],
+    situacao:["Fissura","Defic. juntas/rejunte","Caimento inadequado","Escada s/ antiderrapante","Umidade ascendente/efloresc.","Abatimento do piso","Destacam./descolamento","Som cavo","Outro"] },
+  { id:"impermeabilizacao", title:"7. Impermeabilização", icon:"\u{1F4A7}", tipo:null,
+    situacao:["Infiltração","Descolamento da manta","Sistema perfurado","Ressecam./craqueam. s/ prot. mec.","S/ impermeab. teto reservatórios","S/ caimento p/ ralos","S/ junta dilatação prot. mecânica","Outro"] },
+  { id:"hidrossanitaria", title:"8. Inst. Hidrossanitária", icon:"\u{1F6B0}", tipo:null,
+    situacao:["Vazamento","Deterior./deform. tubulações","Tampas reserv. inadequadas","Não conform. pintura tubul.","S/ identif. registros barrilete","Tubulações obstruídas","Entupim./extravasm. calhas/ralos","Manchas","Outro"] },
+  { id:"gas", title:"9. Inst. de Gás", icon:"\u{1F525}", tipo:null,
+    situacao:["Vazamento","Deterior./deform. tubulações","Não conform. dimensões abrigo","Abertura abrigo acesso via públ.","S/ abertura inferior abrigo","Não conform. pintura tubul.","S/ sinalização obrigatória","Outro"] },
+  { id:"eletrica", title:"10. Inst. Elétrica", icon:"\u26A1", tipo:null,
+    situacao:["Lâmpadas queimadas/ausentes","Modificações/improvisos","Quadro obstr./tranc./s/ identif.","Fiação aparente/emendas/exposta","Pragas em quadros c/ madeira","Falha tomada/interruptor","Ausência prot. barramento","Curto circuito","Outro"] },
+];
+
+const GRAU = [{v:"C",l:"Crítico",c:"#dc3545"},{v:"R",l:"Regular",c:"#e8a317"},{v:"M",l:"Mínimo",c:"#28a745"}];
+const grauLabel = v => (GRAU.find(g=>g.v===v)||{}).l||v;
+const grauColor = v => (GRAU.find(g=>g.v===v)||{}).c||"#999";
+const countIssues = p => Object.values(p.sections).reduce((a,s)=>a+s.situacao.length,0);
+const countCrit = p => Object.values(p.sections).reduce((a,s)=>a+Object.values(s.grau).filter(g=>g==="C").length,0);
+
+const emptyFloor = name => ({
+  pavimento:name, data:new Date().toISOString().split("T")[0],
+  sections:SECTIONS.reduce((a,s)=>{a[s.id]={tipo:[],situacao:[],grau:{},obs:"",fotos:0};return a},{}),
+  parecer:{ocupabilidade:"",anomalia:"",falha:"",recomendacoes:""}
+});
+
+// ═══════════════════════════════════════════════
+// STORAGE (IndexedDB via simple wrapper)
+// ═══════════════════════════════════════════════
+const DB_NAME = 'inspecao-predial';
+const DB_STORE = 'data';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbGet(key) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(DB_STORE, 'readonly');
+    const req = tx.objectStore(DB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function dbSet(key, value) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+  });
+}
+
+// ═══════════════════════════════════════════════
+// SYNC
+// ═══════════════════════════════════════════════
+async function syncToSheets(data) {
+  if (!SYNC_URL) return { error: 'SYNC_URL não configurada' };
+  try {
+    const resp = await fetch(SYNC_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'sync', payload: data }),
+    });
+    return await resp.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+// ═══════════════════════════════════════════════
+// REACT APP (compiled without JSX for CDN usage)
+// ═══════════════════════════════════════════════
+const h = React.createElement;
+const { useState, useEffect, useCallback } = React;
+
+// Helpers
+const Tag = ({children, variant="green"}) => {
+  const colors = {green:{bg:"#D4EDDA",fg:"#1F4E3D"},red:{bg:"#f8d7da",fg:"#721c24"},gray:{bg:"#e9ecef",fg:"#495057"}};
+  const c = colors[variant]||colors.green;
+  return h('span',{style:{display:"inline-block",background:c.bg,color:c.fg,borderRadius:4,padding:"2px 8px",fontSize:11,fontWeight:700,marginRight:4}},children);
+};
+
+const CheckBox = ({on,onClick}) => h('div',{onClick,style:{width:26,height:26,borderRadius:6,border:`2px solid ${on?"#2E7D5B":"#bbb"}`,background:on?"#2E7D5B":"white",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,color:"white",fontSize:16,fontWeight:700}},on?"✓":null);
+
+const Radio = ({on,onClick,label}) => h('div',{onClick,style:{display:"flex",alignItems:"center",gap:10,padding:"9px 0",cursor:"pointer"}},
+  h('div',{style:{width:22,height:22,borderRadius:"50%",border:`2px solid ${on?"#2E7D5B":"#bbb"}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}},
+    on?h('div',{style:{width:12,height:12,borderRadius:"50%",background:"#2E7D5B"}}):null),
+  h('span',{style:{fontSize:15}},label));
+
+const Modal = ({title,onClose,onConfirm,value,onChange,placeholder}) => h(React.Fragment,null,
+  h('div',{onClick:onClose,style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.3)",zIndex:25}}),
+  h('div',{style:{position:"fixed",bottom:0,left:0,right:0,background:"white",borderRadius:"16px 16px 0 0",padding:"20px 20px 30px",boxShadow:"0 -4px 20px rgba(0,0,0,0.15)",zIndex:30,maxWidth:480,margin:"0 auto"}},
+    h('div',{style:{fontSize:17,fontWeight:700,marginBottom:14}},title),
+    h('input',{style:{width:"100%",border:"1.5px solid #ddd",borderRadius:8,padding:"12px 14px",fontSize:16,boxSizing:"border-box"},value,onChange:e=>onChange(e.target.value),placeholder,autoFocus:true,onKeyDown:e=>{if(e.key==="Enter")onConfirm()}}),
+    h('button',{onClick:onConfirm,style:{background:"#2E7D5B",color:"white",border:"none",borderRadius:8,padding:"13px",fontSize:15,fontWeight:600,cursor:"pointer",width:"100%",marginTop:12}},"Confirmar")));
+
+function App() {
+  const [data, setData] = useState({edificios:[]});
+  const [view, setView] = useState("home");
+  const [selEdif, setSelEdif] = useState(null);
+  const [selFloor, setSelFloor] = useState(null);
+  const [expandedSec, setExpandedSec] = useState(null);
+  const [showModal, setShowModal] = useState(null);
+  const [newName, setNewName] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState("");
+
+  useEffect(()=>{(async()=>{try{const d=await dbGet("appdata");if(d)setData(d)}catch{}setLoaded(true)})()},[]);
+  const persist = useCallback(async d=>{setData(d);try{await dbSet("appdata",d)}catch{}},[]);
+
+  const edif = () => selEdif!==null?data.edificios[selEdif]:null;
+  const floor = () => (selEdif!==null&&selFloor!==null)?data.edificios[selEdif]?.pavimentos[selFloor]:null;
+
+  const addEdificio = ()=>{if(!newName.trim())return;persist({...data,edificios:[...data.edificios,{nome:newName.trim(),endereco:"",pavimentos:[]}]});setNewName("");setShowModal(null)};
+  const deleteEdificio = i=>{if(!confirm("Excluir este edifício e todas as inspeções?"))return;persist({...data,edificios:data.edificios.filter((_,j)=>j!==i)})};
+  const updateEdifEndereco = v=>{const d={...data,edificios:[...data.edificios]};d.edificios[selEdif]={...d.edificios[selEdif],endereco:v};persist(d)};
+  const addFloor = ()=>{if(!newName.trim())return;const d={...data,edificios:[...data.edificios]};d.edificios[selEdif]={...d.edificios[selEdif],pavimentos:[...d.edificios[selEdif].pavimentos,emptyFloor(newName.trim())]};persist(d);setNewName("");setShowModal(null)};
+  const deleteFloor = i=>{if(!confirm("Excluir esta inspeção?"))return;const d={...data,edificios:[...data.edificios]};d.edificios[selEdif]={...d.edificios[selEdif],pavimentos:d.edificios[selEdif].pavimentos.filter((_,j)=>j!==i)};persist(d)};
+
+  const uf = fn=>{const d={...data,edificios:[...data.edificios]};const e={...d.edificios[selEdif],pavimentos:[...d.edificios[selEdif].pavimentos]};e.pavimentos[selFloor]=fn({...e.pavimentos[selFloor]});d.edificios[selEdif]=e;persist(d)};
+  const toggleTipo = (sid,item)=>uf(f=>{const s={...f.sections[sid]};s.tipo=s.tipo.includes(item)?s.tipo.filter(t=>t!==item):[...s.tipo,item];return{...f,sections:{...f.sections,[sid]:s}}});
+  const toggleSit = (sid,item)=>uf(f=>{const s={...f.sections[sid]};s.situacao=s.situacao.includes(item)?s.situacao.filter(t=>t!==item):[...s.situacao,item];return{...f,sections:{...f.sections,[sid]:s}}});
+  const setGrau = (sid,item,v)=>uf(f=>{const s={...f.sections[sid]};s.grau={...s.grau,[item]:v};return{...f,sections:{...f.sections,[sid]:s}}});
+  const setObs = (sid,v)=>uf(f=>{const s={...f.sections[sid]};return{...f,sections:{...f.sections,[sid]:{...s,obs:v}}}});
+  const addFoto = sid=>uf(f=>{const s={...f.sections[sid]};return{...f,sections:{...f.sections,[sid]:{...s,fotos:(s.fotos||0)+1}}}});
+  const setParecer = (k,v)=>uf(f=>({...f,parecer:{...f.parecer,[k]:v}}));
+
+  const doSync = async()=>{setSyncing(true);setSyncMsg("");const r=await syncToSheets(data);setSyncing(false);setSyncMsg(r.error?"Erro: "+r.error:"Sincronizado! "+r.timestamp)};
+
+  if(!loaded) return h('div',{style:{fontFamily:"system-ui",maxWidth:480,margin:"0 auto"}},h('div',{style:{background:"#1F4E3D",color:"white",padding:16,fontSize:14}},"Carregando..."));
+
+  // ── REPORT ──
+  if(view==="report"&&edif()){
+    const e=edif();const today=new Date().toLocaleDateString("pt-BR");
+    const totalI=e.pavimentos.reduce((a,p)=>a+countIssues(p),0);
+    const totalC=e.pavimentos.reduce((a,p)=>a+countCrit(p),0);
+    const secSum=SECTIONS.map(sec=>{const all={};e.pavimentos.forEach(p=>{(p.sections[sec.id]?.situacao||[]).forEach(item=>{if(!all[item])all[item]={floors:[],graus:[]};all[item].floors.push(p.pavimento);const g=p.sections[sec.id]?.grau[item];if(g)all[item].graus.push(g)})});return{...sec,allIssues:all,n:Object.keys(all).length}}).filter(s=>s.n>0);
+
+    const rs={page:{fontFamily:"Georgia,serif",maxWidth:800,margin:"0 auto",background:"white",padding:"20px 24px",fontSize:13,lineHeight:1.6},
+      h1:{fontSize:20,fontWeight:700,color:"#1F4E3D",borderBottom:"3px solid #1F4E3D",paddingBottom:8,marginBottom:4},
+      h2:{fontSize:16,fontWeight:700,color:"#1F4E3D",marginTop:24,marginBottom:8,borderBottom:"1px solid #D4EDDA",paddingBottom:4},
+      h3:{fontSize:14,fontWeight:700,color:"#2E7D5B",marginTop:16,marginBottom:6},
+      meta:{fontSize:12,color:"#666",marginBottom:2},
+      th:{background:"#1F4E3D",color:"white",padding:"8px 10px",textAlign:"left",fontSize:11,fontWeight:700},
+      td:{padding:"6px 10px",borderBottom:"1px solid #e0e0e0",verticalAlign:"top"},
+      badge:c=>({display:"inline-block",background:c,color:"white",borderRadius:3,padding:"1px 6px",fontSize:10,fontWeight:700}),
+      obs:{background:"#f8f9fa",borderLeft:"3px solid #2E7D5B",padding:"8px 12px",margin:"6px 0",fontSize:12,fontStyle:"italic",color:"#555"}};
+
+    return h('div',{style:{background:"#f0f0f0",minHeight:"100vh"}},
+      h('div',{className:"no-print",style:{background:"#1F4E3D",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:10,maxWidth:800,margin:"0 auto"}},
+        h('button',{onClick:()=>setView("edificio"),style:{background:"none",border:"none",color:"white",fontSize:14,cursor:"pointer"}},"← Voltar"),
+        h('span',{style:{fontSize:13,fontWeight:600}},"Relatório"),
+        h('button',{onClick:()=>window.print(),style:{background:"rgba(255,255,255,0.2)",border:"none",color:"white",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer"}},"🖨️ Imprimir / PDF")),
+      h('div',{style:rs.page},
+        h('div',{style:{textAlign:"center",marginBottom:20}},
+          h('div',{style:{fontSize:11,color:"#888",textTransform:"uppercase",letterSpacing:1}},"Instituto Federal de Brasília — Secretaria do Patrimônio da União"),
+          h('div',{style:{fontSize:11,color:"#888"}},"Projeto nº 730 — TED 43/2023 — ABNT NBR 16747:2023")),
+        h('h1',{style:rs.h1},"Relatório de Inspeção Predial"),
+        h('div',{style:rs.meta},h('strong',null,"Edifício: "),e.nome),
+        e.endereco&&h('div',{style:rs.meta},h('strong',null,"Endereço: "),e.endereco),
+        h('div',{style:rs.meta},h('strong',null,"Emissão: "),today),
+        h('div',{style:rs.meta},h('strong',null,"Pavimentos inspecionados: "),e.pavimentos.length),
+
+        h('h2',{style:rs.h2},"1. Quadro Resumo por Pavimento"),
+        h('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12,marginTop:8}},
+          h('thead',null,h('tr',null,["Pavimento","Data","Patologias","Críticas","Ocupabilidade","Anomalia"].map((t,i)=>h('th',{key:i,style:rs.th},t)))),
+          h('tbody',null,
+            e.pavimentos.map((p,i)=>{const n=countIssues(p),cr=countCrit(p);return h('tr',{key:i,style:i%2?{background:"#f9f9f9"}:{}},
+              h('td',{style:{...rs.td,fontWeight:600}},p.pavimento),h('td',{style:rs.td},p.data),
+              h('td',{style:rs.td},n>0?h('span',{style:rs.badge(cr>0?"#dc3545":"#6c757d")},n):"—"),
+              h('td',{style:rs.td},cr>0?h('span',{style:rs.badge("#dc3545")},cr):"—"),
+              h('td',{style:rs.td},p.parecer?.ocupabilidade||"—"),h('td',{style:rs.td},p.parecer?.anomalia||"—"))}),
+            h('tr',{style:{background:"#1F4E3D",color:"white"}},
+              h('td',{style:{...rs.td,fontWeight:700,borderBottom:"none",color:"white"}},"TOTAL"),h('td',{style:{...rs.td,borderBottom:"none"}}),
+              h('td',{style:{...rs.td,fontWeight:700,borderBottom:"none",color:"white"}},totalI),h('td',{style:{...rs.td,fontWeight:700,borderBottom:"none",color:"white"}},totalC),
+              h('td',{style:{...rs.td,borderBottom:"none"},colSpan:2})))),
+
+        h('h2',{style:rs.h2},"2. Patologias por Sistema Construtivo"),
+        secSum.length===0?h('p',{style:{color:"#999",fontStyle:"italic"}},"Nenhuma patologia."):
+          secSum.map(sec=>h('div',{key:sec.id},
+            h('h3',{style:rs.h3},sec.icon," ",sec.title),
+            h('table',{style:{width:"100%",borderCollapse:"collapse",fontSize:12,marginBottom:12}},
+              h('thead',null,h('tr',null,h('th',{style:rs.th},"Patologia"),h('th',{style:rs.th},"Pavimentos"),h('th',{style:rs.th},"Grau"))),
+              h('tbody',null,Object.entries(sec.allIssues).map(([item,info],j)=>{
+                const w=info.graus.includes("C")?"C":info.graus.includes("R")?"R":info.graus.includes("M")?"M":"";
+                return h('tr',{key:j,style:j%2?{background:"#f9f9f9"}:{}},h('td',{style:rs.td},item),h('td',{style:rs.td},info.floors.join(", ")),
+                  h('td',{style:rs.td},w?h('span',{style:rs.badge(grauColor(w))},grauLabel(w)):"—"))}))))),
+
+        h('h2',{style:rs.h2},"3. Detalhamento por Pavimento"),
+        e.pavimentos.map((p,pi)=>{
+          const active=SECTIONS.filter(s=>p.sections[s.id]?.situacao.length>0||p.sections[s.id]?.obs);
+          return h('div',{key:pi,style:{marginBottom:20,pageBreakInside:"avoid"}},
+            h('h3',{style:{...rs.h3,fontSize:15,background:"#EBF5EE",padding:"6px 10px",borderRadius:4}},p.pavimento," — ",p.data),
+            active.length===0?h('p',{style:{fontSize:12,color:"#999",fontStyle:"italic",marginLeft:10}},"Sem patologias."):
+              active.map(sec=>{const d=p.sections[sec.id];return h('div',{key:sec.id,style:{marginLeft:10,marginBottom:10}},
+                h('div',{style:{fontSize:13,fontWeight:700}},sec.title),
+                d.tipo.length>0&&h('div',{style:{fontSize:11,color:"#888"}},"Tipo: ",d.tipo.join(", ")),
+                d.situacao.map((item,k)=>{const g=d.grau[item];return h('div',{key:k,style:{fontSize:12,display:"flex",alignItems:"center",gap:6,padding:"2px 0"}},
+                  h('span',null,"•"),h('span',{style:{flex:1}},item),g&&h('span',{style:rs.badge(grauColor(g))},grauLabel(g)))}),
+                d.obs&&h('div',{style:rs.obs},d.obs))}),
+            p.parecer?.ocupabilidade&&h('div',{style:{marginLeft:10,marginTop:8,padding:"8px 12px",background:"#f0f7f3",borderRadius:6}},
+              h('div',{style:{fontSize:12,fontWeight:700,color:"#1F4E3D"}},"Parecer"),
+              h('div',{style:{fontSize:12,marginTop:2}},"Ocupabilidade: ",h('strong',null,p.parecer.ocupabilidade)),
+              p.parecer.anomalia&&h('div',{style:{fontSize:12}},"Anomalia: ",p.parecer.anomalia),
+              p.parecer.falha&&h('div',{style:{fontSize:12}},"Falha: ",p.parecer.falha),
+              p.parecer.recomendacoes&&h('div',{style:rs.obs},p.parecer.recomendacoes)))}),
+
+        h('div',{style:{marginTop:40,paddingTop:16,borderTop:"2px solid #1F4E3D",display:"flex",justifyContent:"space-between",fontSize:11,color:"#888"}},
+          h('div',null,"IFB / SPU — Projeto 730"),h('div',null,"Gerado em ",today))));
+  }
+
+  // ── HOME ──
+  if(view==="home") return h('div',{style:{maxWidth:480,margin:"0 auto",minHeight:"100vh",background:"#f4f6f4"}},
+    h('div',{style:{background:"#1F4E3D",color:"white",padding:"16px 18px"}},
+      h('div',{style:{fontSize:18,fontWeight:700}},"Inspeção Predial"),
+      h('div',{style:{fontSize:12,opacity:0.75,marginTop:2}},"IFB / SPU — Projeto 730 — NBR 16747")),
+    h('div',{style:{padding:"12px 14px 90px"}},
+      SYNC_URL&&h('button',{onClick:doSync,disabled:syncing,style:{width:"100%",background:"white",border:"2px solid #2E7D5B",borderRadius:10,padding:12,fontSize:13,fontWeight:600,color:"#2E7D5B",cursor:"pointer",marginBottom:12}},
+        syncing?"Sincronizando...":"☁️ Sincronizar com Planilha"),
+      syncMsg&&h('div',{style:{fontSize:12,color:syncMsg.includes("Erro")?"#dc3545":"#28a745",marginBottom:8,textAlign:"center"}},syncMsg),
+      data.edificios.length===0?
+        h('div',{style:{textAlign:"center",padding:"60px 20px",color:"#aaa"}},h('div',{style:{fontSize:56,marginBottom:10}},"🏢"),h('div',{style:{fontSize:16,fontWeight:600,color:"#777"}},"Nenhum edifício"),h('div',{style:{fontSize:13,marginTop:4}},"Toque em + para cadastrar")):
+        data.edificios.map((e,i)=>{const tot=e.pavimentos.length,iss=e.pavimentos.reduce((a,p)=>a+countIssues(p),0),cri=e.pavimentos.reduce((a,p)=>a+countCrit(p),0);
+          return h('div',{key:i,onClick:()=>{setSelEdif(i);setView("edificio")},style:{background:"white",borderRadius:12,padding:"16px 18px",marginBottom:10,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",cursor:"pointer"}},
+            h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              h('div',{style:{flex:1}},h('div',{style:{fontSize:16,fontWeight:700}},e.nome),e.endereco&&h('div',{style:{fontSize:12,color:"#999",marginTop:2}},e.endereco),
+                h('div',{style:{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}},h(Tag,null,tot," pav."),iss>0&&h(Tag,{variant:cri>0?"red":"gray"},iss," patol."),cri>0&&h(Tag,{variant:"red"},cri," crít."))),
+              h('div',{style:{display:"flex",alignItems:"center",gap:6}},
+                h('button',{onClick:ev=>{ev.stopPropagation();deleteEdificio(i)},style:{background:"none",border:"none",color:"#dc3545",fontSize:18,cursor:"pointer"}},"✕"),
+                h('span',{style:{color:"#ccc",fontSize:22}},"›"))))})),
+    h('button',{onClick:()=>{setNewName("");setShowModal("edif")},style:{position:"fixed",bottom:20,right:20,background:"#1F4E3D",color:"white",border:"none",borderRadius:"50%",width:56,height:56,fontSize:28,cursor:"pointer",boxShadow:"0 4px 14px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15}},"+"),
+    showModal==="edif"&&h(Modal,{title:"Novo edifício",onClose:()=>setShowModal(null),onConfirm:addEdificio,value:newName,onChange:setNewName,placeholder:"Ex: Ed. Renato Feio"}));
+
+  // ── EDIFÍCIO ──
+  if(view==="edificio"&&edif()){const e=edif();
+    return h('div',{style:{maxWidth:480,margin:"0 auto",minHeight:"100vh",background:"#f4f6f4"}},
+      h('div',{style:{background:"#1F4E3D",color:"white",padding:"14px 16px",position:"sticky",top:0,zIndex:20}},
+        h('div',{style:{display:"flex",alignItems:"center",gap:10}},
+          h('button',{onClick:()=>setView("home"),style:{background:"none",border:"none",color:"white",fontSize:24,cursor:"pointer",padding:0}},"‹"),
+          h('div',{style:{flex:1}},h('div',{style:{fontSize:17,fontWeight:700}},e.nome),h('div',{style:{fontSize:11,opacity:0.75}},e.pavimentos.length," pavimento",e.pavimentos.length!==1?"s":"")))),
+      h('div',{style:{padding:"12px 14px 90px"}},
+        h('div',{style:{background:"white",borderRadius:12,padding:"14px 16px",marginBottom:12,boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}},
+          h('label',{style:{fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase"}},"Endereço"),
+          h('input',{value:e.endereco||"",onChange:ev=>updateEdifEndereco(ev.target.value),placeholder:"Endereço do edifício",style:{width:"100%",border:"1.5px solid #ddd",borderRadius:8,padding:"11px 14px",fontSize:15,boxSizing:"border-box",marginTop:4}})),
+        e.pavimentos.length>0&&h('button',{onClick:()=>setView("report"),style:{width:"100%",background:"white",border:"2px solid #1F4E3D",borderRadius:10,padding:14,fontSize:15,fontWeight:600,color:"#1F4E3D",cursor:"pointer",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:8}},"📄 Gerar Relatório"),
+        e.pavimentos.length===0?h('div',{style:{textAlign:"center",padding:"50px 20px",color:"#aaa"}},h('div',{style:{fontSize:48}},"📋"),h('div',{style:{fontSize:15,fontWeight:600,color:"#888",marginTop:8}},"Nenhum pavimento")):
+          e.pavimentos.map((p,i)=>{const n=countIssues(p),cr=countCrit(p),oc=p.parecer?.ocupabilidade;
+            return h('div',{key:i,onClick:()=>{setSelFloor(i);setExpandedSec(null);setView("floor")},style:{background:"white",borderRadius:12,padding:"14px 16px",marginBottom:8,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",cursor:"pointer"}},
+              h('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+                h('div',null,h('div',{style:{fontSize:15,fontWeight:700}},p.pavimento),h('div',{style:{fontSize:12,color:"#999",marginTop:2}},p.data),
+                  h('div',{style:{marginTop:5,display:"flex",gap:4,flexWrap:"wrap"}},n>0?h(Tag,{variant:cr>0?"red":"gray"},n," patol."):h(Tag,null,"OK"),cr>0&&h(Tag,{variant:"red"},cr," crít."),oc&&h(Tag,null,oc))),
+                h('div',{style:{display:"flex",alignItems:"center",gap:6}},
+                  h('button',{onClick:ev=>{ev.stopPropagation();deleteFloor(i)},style:{background:"none",border:"none",color:"#dc3545",fontSize:18,cursor:"pointer"}},"✕"),
+                  h('span',{style:{color:"#ccc",fontSize:22}},"›"))))})),
+      h('button',{onClick:()=>{setNewName("");setShowModal("floor")},style:{position:"fixed",bottom:20,right:20,background:"#1F4E3D",color:"white",border:"none",borderRadius:"50%",width:56,height:56,fontSize:28,cursor:"pointer",boxShadow:"0 4px 14px rgba(0,0,0,0.3)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:15}},"+"),
+      showModal==="floor"&&h(Modal,{title:"Novo pavimento",onClose:()=>setShowModal(null),onConfirm:addFloor,value:newName,onChange:setNewName,placeholder:"Ex: 2º andar, Cobertura..."}));}
+
+  // ── FLOOR ──
+  if(view==="floor"&&floor()){const f=floor();const sd=id=>f.sections[id]||{tipo:[],situacao:[],grau:{},obs:"",fotos:0};
+    return h('div',{style:{maxWidth:480,margin:"0 auto",minHeight:"100vh",background:"#f4f6f4"}},
+      h('div',{style:{background:"#1F4E3D",color:"white",padding:"14px 16px",position:"sticky",top:0,zIndex:20}},
+        h('div',{style:{display:"flex",alignItems:"center",gap:10}},
+          h('button',{onClick:()=>setView("edificio"),style:{background:"none",border:"none",color:"white",fontSize:24,cursor:"pointer",padding:0}},"‹"),
+          h('div',null,h('div',{style:{fontSize:17,fontWeight:700}},f.pavimento),h('div',{style:{fontSize:11,opacity:0.75}},edif().nome," — ",f.data)))),
+      h('div',{style:{padding:"10px 14px 40px"}},
+        h('div',{style:{background:"white",borderRadius:10,padding:"10px 14px",marginBottom:8,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",display:"flex",alignItems:"center",gap:10}},
+          h('span',{style:{fontSize:12,fontWeight:700,color:"#888"}},"DATA"),
+          h('input',{type:"date",value:f.data,onChange:ev=>uf(fl=>({...fl,data:ev.target.value})),style:{flex:1,border:"1.5px solid #ddd",borderRadius:6,padding:"8px 10px",fontSize:15,fontFamily:"inherit"}})),
+        SECTIONS.map(sec=>{const d=sd(sec.id),open=expandedSec===sec.id,n=d.situacao.length,hasCrit=Object.values(d.grau).includes("C");
+          return h('div',{key:sec.id,style:{marginBottom:4}},
+            h('div',{onClick:()=>setExpandedSec(open?null:sec.id),style:{background:hasCrit?"#c0392b":"#2E7D5B",color:"white",borderRadius:open?"10px 10px 0 0":10,padding:"13px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              h('span',{style:{fontSize:15,fontWeight:600}},sec.icon," ",sec.title),
+              h('div',{style:{display:"flex",alignItems:"center",gap:8}},n>0&&h('span',{style:{background:"rgba(255,255,255,0.25)",borderRadius:12,padding:"2px 10px",fontSize:13,fontWeight:700}},n),h('span',{style:{fontSize:20,transition:"transform 0.2s",transform:open?"rotate(90deg)":"none"}},"›"))),
+            open&&h('div',{style:{background:"white",borderRadius:"0 0 10px 10px",padding:"12px 16px"}},
+              sec.tipo&&h(React.Fragment,null,h('div',{style:{fontSize:11,fontWeight:700,color:"#1F4E3D",marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}},"Tipo"),
+                sec.tipo.map(item=>h('div',{key:item,style:{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},h(CheckBox,{on:d.tipo.includes(item),onClick:()=>toggleTipo(sec.id,item)}),h('span',{style:{fontSize:14}},item)))),
+              h('div',{style:{fontSize:11,fontWeight:700,color:"#1F4E3D",marginTop:14,marginBottom:6,textTransform:"uppercase",letterSpacing:0.5}},"Situação"),
+              sec.situacao.map(item=>{const on=d.situacao.includes(item),g=d.grau[item]||"";
+                return h('div',{key:item,style:{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:"1px solid #f5f5f5"}},
+                  h(CheckBox,{on,onClick:()=>toggleSit(sec.id,item)}),h('span',{style:{fontSize:14,flex:1,fontWeight:on?600:400}},item),
+                  on&&h('div',{style:{display:"flex",gap:4}},GRAU.map(gr=>h('div',{key:gr.v,onClick:()=>setGrau(sec.id,item,gr.v),style:{width:32,height:30,borderRadius:15,border:"2px solid "+gr.c,background:g===gr.v?gr.c:"white",color:g===gr.v?"white":gr.c,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:12,fontWeight:700}},gr.v))))}),
+              h('div',{style:{marginTop:14}},h('div',{style:{fontSize:11,fontWeight:700,color:"#888",marginBottom:4,textTransform:"uppercase"}},"Observações"),
+                h('textarea',{value:d.obs,onChange:ev=>setObs(sec.id,ev.target.value),placeholder:"Detalhamentos, medições...",style:{width:"100%",border:"1.5px solid #e0e0e0",borderRadius:8,padding:"10px 12px",fontSize:14,minHeight:60,boxSizing:"border-box",resize:"vertical",fontFamily:"inherit"}})),
+              h('button',{onClick:()=>addFoto(sec.id),style:{background:"#f7f7f7",border:"1.5px dashed #ccc",borderRadius:8,padding:"10px 14px",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",gap:8,color:"#666",marginTop:8,width:"100%",boxSizing:"border-box"}},"📷 Foto (",d.fotos||0,")")));}),
+        // Parecer
+        h('div',{style:{marginTop:8}},
+          h('div',{onClick:()=>setExpandedSec(expandedSec==="parecer"?null:"parecer"),style:{background:"#1F4E3D",color:"white",borderRadius:expandedSec==="parecer"?"10px 10px 0 0":10,padding:"13px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}},
+            h('span',{style:{fontSize:15,fontWeight:600}},"📝 Parecer"),h('span',{style:{fontSize:20,transform:expandedSec==="parecer"?"rotate(90deg)":"none"}},"›")),
+          expandedSec==="parecer"&&h('div',{style:{background:"white",borderRadius:"0 0 10px 10px",padding:"12px 16px"}},
+            h('div',{style:{fontSize:11,fontWeight:700,color:"#1F4E3D",marginBottom:4,textTransform:"uppercase"}},"Ocupabilidade"),
+            ["Ocupável","Ocupável com restrições","Após intervenções","Não ocupável"].map(o=>h(Radio,{key:o,on:f.parecer.ocupabilidade===o,onClick:()=>setParecer("ocupabilidade",o),label:o})),
+            h('div',{style:{fontSize:11,fontWeight:700,color:"#1F4E3D",marginTop:12,marginBottom:4,textTransform:"uppercase"}},"Anomalia (NBR 16747)"),
+            ["Endógena","Exógena","Funcional"].map(o=>h(Radio,{key:o,on:f.parecer.anomalia===o,onClick:()=>setParecer("anomalia",o),label:o})),
+            h('div',{style:{fontSize:11,fontWeight:700,color:"#1F4E3D",marginTop:12,marginBottom:4,textTransform:"uppercase"}},"Falha"),
+            ["Uso","Operação","Manutenção"].map(o=>h(Radio,{key:o,on:f.parecer.falha===o,onClick:()=>setParecer("falha",o),label:o})),
+            h('div',{style:{marginTop:14}},h('div',{style:{fontSize:11,fontWeight:700,color:"#888",marginBottom:4,textTransform:"uppercase"}},"Recomendações"),
+              h('textarea',{value:f.parecer.recomendacoes,onChange:ev=>setParecer("recomendacoes",ev.target.value),placeholder:"Intervenções prioritárias...",style:{width:"100%",border:"1.5px solid #e0e0e0",borderRadius:8,padding:"10px 12px",fontSize:14,minHeight:80,boxSizing:"border-box",resize:"vertical",fontFamily:"inherit"}}))))));
+  }
+  return null;
+}
+
+// Mount
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+
+// Register Service Worker
+if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js').then(r=>console.log('SW registered')).catch(e=>console.log('SW failed',e))}
+
+// Listen for sync messages from SW
+if(navigator.serviceWorker){navigator.serviceWorker.addEventListener('message',e=>{if(e.data.type==='SYNC_NOW'){/* trigger sync */}})}
+</script>
+</body>
+</html>
