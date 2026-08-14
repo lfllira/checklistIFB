@@ -114,13 +114,12 @@ async function dbSet(key, value) {
 async function syncToSheets(data) {
   if (!SYNC_URL) return { error: 'SYNC_URL não configurada' };
   try {
-    const resp = await fetch(SYNC_URL, {
+    await fetch(SYNC_URL, {
       method: 'POST',
       body: JSON.stringify({ action: 'sync', payload: data }),
-      redirect: 'follow',
+      mode: 'no-cors',
     });
-    const text = await resp.text();
-    try { return JSON.parse(text); } catch { return { status: 'ok', raw: text }; }
+    return { status: 'ok', timestamp: new Date().toLocaleString('pt-BR') };
   } catch (e) {
     return { error: e.message };
   }
