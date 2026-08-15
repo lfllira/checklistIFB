@@ -114,27 +114,23 @@ async function dbSet(key, value) {
 async function syncToSheets(data) {
   if (!SYNC_URL) return { error: 'SYNC_URL não configurada' };
   try {
-    const iframe = document.createElement('iframe');
+    var iframe = document.createElement('iframe');
     iframe.name = 'sync_' + Date.now();
     iframe.style.display = 'none';
     document.body.appendChild(iframe);
-
-    const form = document.createElement('form');
+    var form = document.createElement('form');
     form.method = 'POST';
     form.action = SYNC_URL;
     form.target = iframe.name;
-
-    const input = document.createElement('input');
+    var input = document.createElement('input');
     input.type = 'hidden';
     input.name = 'data';
     input.value = JSON.stringify({ action: 'sync', payload: data });
     form.appendChild(input);
-
     document.body.appendChild(form);
     form.submit();
     form.remove();
-
-    setTimeout(() => iframe.remove(), 5000);
+    setTimeout(function() { iframe.remove(); }, 5000);
     return { status: 'ok', timestamp: new Date().toLocaleString('pt-BR') };
   } catch (e) {
     return { error: e.message };
