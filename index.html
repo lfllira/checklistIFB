@@ -197,7 +197,8 @@ function App() {
   const setParecer = (k,v)=>uf(f=>({...f,parecer:{...f.parecer,[k]:v}}));
 
 const updateInspetor = v=>{const d={...data,inspetor:v};persist(d)};
-  const doSync = async()=>{if(!data.inspetor.trim()){setSyncMsg("Preencha o nome do inspetor");return;}setSyncing(true);setSyncMsg("");const r=await syncToSheets(data);setSyncing(false);setSyncMsg(r.error?"Erro: "+r.error:"Sincronizado! "+r.timestamp)}; 
+  const doSync = async()=>{if(!data.inspetor.trim()){setSyncMsg("Preencha o nome do inspetor");return;}setSyncing(true);setSyncMsg("");const r=await syncToSheets(data);setSyncing(false);setSyncMsg(r.error?"Erro: "+r.error:"Sincronizado! "+r.timestamp)};
+ 
   if(!loaded) return h('div',{style:{fontFamily:"system-ui",maxWidth:480,margin:"0 auto"}},h('div',{style:{background:"#1F4E3D",color:"white",padding:16,fontSize:14}},"Carregando..."));
 
   // ── REPORT ──
